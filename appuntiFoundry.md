@@ -33,4 +33,4 @@ Questo `Makefile` definisce il contenuto di alcuni comandi (in maniera simile a 
 Per avere una fake chain in localhost puoi installare hardhat > create an empty hardhat.config.js > yarn hardhat node
 Per deployare il contratto, lancia `forge create nomeContratto --private-key 0x... --rpc-url alchemy.io/...` (oppure localhost se abbiamo creato la fake chain con hardhat). Puoi anche creare uno script in `Makefile` per il deployù
 
-Per fare i test invece è bene utilizzare `forge test -vv`. Per testare sulla mainnet (fantom) aggiungi il flag `--rpc-url https://rpc.ankr.com/fantom`
+Per fare i test invece è bene utilizzare `forge test -vvvv`. Per testare sulla mainnet (fantom) aggiungi il flag `--rpc-url https://rpc.ankr.com/fantom`
