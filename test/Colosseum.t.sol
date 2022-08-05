@@ -21,6 +21,8 @@ interface urbeArena {
     function getGladiator(uint256) external view returns (Gladiator memory);
 
     function closeDailyFight() external;
+
+    function blockLag() external view returns (uint256);
 }
 
 //We test our contract in the Colosseum
@@ -93,6 +95,9 @@ contract Colosseum is Test {
             !(urbeArena(deployed).getGladiator(0)).alreadyAttacked,
             "Attacked!"
         );
+        //We move to the next session
+        emit log_uint(urbeArena(deployed).blockLag());
+        vm.roll(urbeArena(deployed).blockLag());
         //Now we close the daily fight
         urbeArena(deployed).closeDailyFight();
         // Now tokenId0 should be death, while tokenid1 should be alive
@@ -122,6 +127,8 @@ contract Colosseum is Test {
             }
         }
         vm.prank(user1);
+        //We move to the next session
+        vm.roll(urbeArena(deployed).blockLag());
         urbeArena(deployed).closeDailyFight();
     }
 
