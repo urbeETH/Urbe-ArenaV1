@@ -14,7 +14,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     using SafeMath for uint256;
 
     // events
-    event Death(uint256 gladiatorId, address owner); // (gladiatorId, owner)
+    event Death(uint256 gladiatorId, address owner, uint256 numberOfAttacks); // (gladiatorId, owner, numberofAttacks)
     event Attack(
         uint256 gladiatorId,
         uint256 opponentId,
@@ -50,12 +50,14 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     }
 
     // Array of the most attacked gladiators (=tokendIds) in this session
+    uint256 internal likelyToDieId = 999;
     uint256 internal _highestNumAttacksReceived;
-    uint256[] internal mostAttackedCurrently;
+    // uint256[] internal mostAttackedCurrently;
     uint256 internal lessEps = type(uint256).max;
-    uint256[] internal lessEpsGladiators;
+    // uint256[] internal lessEpsGladiators;
     uint256 internal mostEverAttacks;
-    uint256[] internal mostEverAttacksGladiators;
+
+    // uint256[] internal mostEverAttacksGladiators;
 
     constructor(
         string memory name,
@@ -165,43 +167,57 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
                 _highestNumAttacksReceived <
                 numberOfAttacksReceived[targetTokenId]
             ) {
+                likelyToDieId = targetTokenId;
                 _highestNumAttacksReceived = numberOfAttacksReceived[
                     targetTokenId
                 ];
-                delete mostAttackedCurrently;
+                // delete mostAttackedCurrently;
+            } else {
+                if (lessEps >= eps[targetTokenId]) {
+                    if (lessEps > eps[targetTokenId]) {
+                        likelyToDieId = targetTokenId;
+                        lessEps = eps[targetTokenId];
+                    } else {
+                        if (
+                            mostEverAttacks <=
+                            numAttacksEverReceived[targetTokenId]
+                        ) {
+                            if (
+                                mostEverAttacks <
+                                numAttacksEverReceived[targetTokenId]
+                            ) {
+                                likelyToDieId = targetTokenId;
+                                mostEverAttacks = numAttacksEverReceived[
+                                    targetTokenId
+                                ];
+                            } else {
+                                likelyToDieId = 999;
+                            }
+                        }
+                    }
+                }
             }
-            mostAttackedCurrently.push(targetTokenId);
+            attackSubmitted[attackerTokenId] = targetTokenId;
+            alreadyAttacked[attackerTokenId] = true;
+            emit Attack(
+                attackerTokenId,
+                targetTokenId,
+                msg.sender,
+                ownerOf(targetTokenId)
+            );
         }
-        if (lessEps >= eps[targetTokenId]) {
-            if (lessEps > eps[targetTokenId]) {
-                lessEps = eps[targetTokenId];
-                delete lessEpsGladiators;
-            }
-            lessEpsGladiators.push(targetTokenId);
-        }
-        if (mostEverAttacks <= numAttacksEverReceived[targetTokenId]) {
-            if (mostEverAttacks < numAttacksEverReceived[targetTokenId]) {
-                mostEverAttacks = numAttacksEverReceived[targetTokenId];
-                delete mostEverAttacksGladiators;
-            }
-            mostEverAttacksGladiators.push(targetTokenId);
-        }
-        attackSubmitted[attackerTokenId] = targetTokenId;
-        alreadyAttacked[attackerTokenId] = true;
-        emit Attack(
-            attackerTokenId,
-            targetTokenId,
-            msg.sender,
-            ownerOf(targetTokenId)
-        );
     }
 
     /* Process the attacks received, set a gladiator as died, reward winners with EPs */
     function closeDailyFight() public {
-        uint256 deadGladiatorId = getDeadGladiatorId();
+        uint256 deadGladiatorId = likelyToDieId;
         if (deadGladiatorId != 999) {
             isDeath[deadGladiatorId] = true;
-            emit Death(deadGladiatorId, ownerOf(deadGladiatorId));
+            emit Death(
+                deadGladiatorId,
+                ownerOf(deadGladiatorId),
+                numberOfAttacksReceived[deadGladiatorId]
+            );
             // give 1 EP to all the gladiators who attacked deadGladiatorId in this round and prepare values for the next game
             for (uint256 i = 0; i < totalSupply(); i++) {
                 if (isDeath[i] == false) {
@@ -220,61 +236,62 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     }
 
     /* Get the ID of today's dead gladiator */
-    function getDeadGladiatorId() internal view returns (uint256) {
-        //Non-Edge case
-        if (mostAttackedCurrently.length == 1) {
-            return mostAttackedCurrently[0];
-        }
-        //handle first hedge case
-        else if (lessEpsGladiators.length == 1) {
-            return lessEpsGladiators[0];
-        }
-        //handle second hedge case
-        else if (mostEverAttacksGladiators.length == 1) {
-            return mostEverAttacksGladiators[0];
-        }
-        //handle third hedge case
-        else {
-            return 999;
-        }
-        // //handle first hedge case
-        // for (uint256 i = 0; i < mostAttackedCurrently.length; i++) {
-        //     if (eps[mostAttackedCurrently[i]] <= lessEps) {
-        //         if (eps[mostAttackedCurrently[i]] < lessEps) {
-        //             lessEps = eps[mostAttackedCurrently[i]];
-        //             delete lessEpsGladiators;
-        //         }
-        //         lessEpsGladiators.push(mostAttackedCurrently[i]);
-        //     }
-        // }
-        // if (lessEpsGladiators.length == 1) {
-        //     return lessEpsGladiators[0];
-        // }
-        // //Handle second hedge case
-        // for (uint256 i = 0; i < lessEpsGladiators.length; i++) {
-        //     if (
-        //         numAttacksEverReceived[lessEpsGladiators[i]] >= mostEverAttacks
-        //     ) {
-        //         if (
-        //             numAttacksEverReceived[lessEpsGladiators[i]] >
-        //             mostEverAttacks
-        //         ) {
-        //             mostEverAttacks = numAttacksEverReceived[
-        //                 lessEpsGladiators[i]
-        //             ];
-        //             delete mostEverAttacksGladiators;
-        //         }
-        //         mostEverAttacksGladiators.push(lessEpsGladiators[i]);
-        //     }
-        // }
-        // if (mostEverAttacksGladiators.length == 1) {
-        //     return mostEverAttacksGladiators[0];
-        // }
-        // //Handle third hedge case
-        // else {
-        //     return 999;
-        // }
-    }
+    // function getDeadGladiatorId() internal view returns (uint256) {
+    //     return likelyToDieId;
+    //Non-Edge case
+    // if (mostAttackedCurrently.length == 1) {
+    //     return mostAttackedCurrently[0];
+    // }
+    // //handle first hedge case
+    // else if (lessEpsGladiators.length == 1) {
+    //     return lessEpsGladiators[0];
+    // }
+    // //handle second hedge case
+    // else if (mostEverAttacksGladiators.length == 1) {
+    //     return mostEverAttacksGladiators[0];
+    // }
+    // //handle third hedge case
+    // else {
+    //     return 999;
+    // }
+    // //handle first hedge case
+    // for (uint256 i = 0; i < mostAttackedCurrently.length; i++) {
+    //     if (eps[mostAttackedCurrently[i]] <= lessEps) {
+    //         if (eps[mostAttackedCurrently[i]] < lessEps) {
+    //             lessEps = eps[mostAttackedCurrently[i]];
+    //             delete lessEpsGladiators;
+    //         }
+    //         lessEpsGladiators.push(mostAttackedCurrently[i]);
+    //     }
+    // }
+    // if (lessEpsGladiators.length == 1) {
+    //     return lessEpsGladiators[0];
+    // }
+    // //Handle second hedge case
+    // for (uint256 i = 0; i < lessEpsGladiators.length; i++) {
+    //     if (
+    //         numAttacksEverReceived[lessEpsGladiators[i]] >= mostEverAttacks
+    //     ) {
+    //         if (
+    //             numAttacksEverReceived[lessEpsGladiators[i]] >
+    //             mostEverAttacks
+    //         ) {
+    //             mostEverAttacks = numAttacksEverReceived[
+    //                 lessEpsGladiators[i]
+    //             ];
+    //             delete mostEverAttacksGladiators;
+    //         }
+    //         mostEverAttacksGladiators.push(lessEpsGladiators[i]);
+    //     }
+    // }
+    // if (mostEverAttacksGladiators.length == 1) {
+    //     return mostEverAttacksGladiators[0];
+    // }
+    // //Handle third hedge case
+    // else {
+    //     return 999;
+    // }
+    // }
 
     /* Reset the status of the gladiators that are still alive */
     function resetAliveGladiatorStatus() internal {
