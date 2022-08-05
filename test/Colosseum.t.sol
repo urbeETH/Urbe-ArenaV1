@@ -44,7 +44,6 @@ contract Colosseum is Test {
         address user = address(1);
         vm.deal(user, 100e18);
         vm.startPrank(user);
-        emit log(string(abi.encodePacked(deployed)));
         urbeArena(deployed).mintTokens{value: 1e18}(1);
     }
 
@@ -99,5 +98,36 @@ contract Colosseum is Test {
         // Now tokenId0 should be death, while tokenid1 should be alive
         require((urbeArena(deployed).getGladiator(0)).isDeath, "Zombie!");
         require(!(urbeArena(deployed).getGladiator(1)).isDeath, "Zombie!");
+    }
+
+    function testCloseDailyFightWithTie(uint256 max) public {
+        vm.assume(max <= 100);
+        // A "stress test" to check the gas consumed in the worst case scenario for calling closeDailyFight()
+        // In such context you have 100 living gladiators and there will be no deaths (third hedge case)
+        address deployed = testDeploy();
+        address user1 = address(1);
+        //We mint all the supply
+        for (uint256 i = 0; i < max; i++) {
+            vm.deal(address(uint160(i + 1)), 100e18);
+            vm.prank(address(uint160(i + 1)));
+            urbeArena(deployed).mintTokens{value: 1e18}(1);
+        }
+        //Each dude attacks his pair
+        for (uint256 i = 0; i < max; i++) {
+            vm.prank(address(uint160(i + 1)));
+            if (i == max - 1) {
+                urbeArena(deployed).attack(i, 0);
+            } else {
+                urbeArena(deployed).attack(i, i + 1);
+            }
+        }
+        vm.prank(user1);
+        urbeArena(deployed).closeDailyFight();
+    }
+
+    function testGetReliableEstimationForCloseDailyFightWithTie() public {
+        for (uint256 i = 0; i < 100; i++) {
+            testCloseDailyFightWithTie(i);
+        }
     }
 }
