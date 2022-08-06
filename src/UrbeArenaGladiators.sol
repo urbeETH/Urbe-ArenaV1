@@ -195,7 +195,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             ) {
                 // [Edge Case 1] if this gladiator (targetTokenId) received a num of attacks equal to the current likelyToDieId
                 // we need to compare targetTokenId EPs with likelyToDieId EPS
-                if (likelyToDieEps > eps[targetTokenId]) {
+                if (eps[targetTokenId] < likelyToDieEps) {
                     setLikelyToDieId(targetTokenId);
                 } else if (likelyToDieEps == eps[targetTokenId]) {
                     // [Edge Case 2] if this gladiator (targetTokenId) has the same EPs as the current likelyToDieId
@@ -205,7 +205,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
                         likelyToDieAttacksReceived
                     ) {
                         setLikelyToDieId(targetTokenId);
-                    } else {
+                    } else if (numAttacksEverReceived[targetTokenId] = likelyToDieAttacksReceived) {
                         likelyToDieId = 999;
                         likelyToDieEps = 0;
                         likelyToDieAttacksReceived = 0;
