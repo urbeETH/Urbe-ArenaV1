@@ -206,6 +206,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
                     ) {
                         setLikelyToDieId(targetTokenId);
                     } else if (numAttacksEverReceived[targetTokenId] = likelyToDieAttacksReceived) {
+                        // Finally, if we are here we have a tie, nobody dies
                         likelyToDieId = 999;
                         likelyToDieEps = 0;
                         likelyToDieAttacksReceived = 0;
