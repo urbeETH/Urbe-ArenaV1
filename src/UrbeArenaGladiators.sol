@@ -5,6 +5,7 @@
 //thinking a way to handle 1vs1 end fight
 
 pragma solidity >=0.8.0;
+
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -50,10 +51,9 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     }
 
     // Array of the most attacked gladiators (=tokendIds) in this session
-    uint256 internal likelyToDieId = 999;
-    uint256 internal _highestNumAttacksReceived;
-    uint256 internal lessEps = type(uint256).max;
-    uint256 internal mostEverAttacks;
+    uint256 internal likelyToDieId;
+    uint256 internal likelyToDieEps;
+    uint256 internal likelyToDieAttacksReceived;
 
     // Parameters for closing the daily fight
     uint256 lastBlockClosedFight;
@@ -71,6 +71,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         setMaxTokens(maxTokens);
         setMaxMints(maxMints);
         setBaseURI(baseURI);
+        setLikelyToDieId(999);
     }
 
     /* Setters */
@@ -90,8 +91,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         MAX_TOKENS = maxTokens_;
     }
 
-    function set_blockLag(uint256 _lag) public onlyOwner {
+    function setBlockLag(uint256 _lag) public onlyOwner {
         _blockLag = _lag;
+    }
+
+    function setLikelyToDieId(uint256 _likelyToDieId) internal {
+        likelyToDieId = _likelyToDieId;
     }
 
     /* Getters */
@@ -147,6 +152,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         return _blockLag;
     }
 
+    function setLikelyToDieId(uint256 tokenId) internal {
+        likelyToDieId = tokenId;
+        likelyToDieEps = eps[tokenId];
+        likelyToDieAttacksReceived = numberOfAttacksReceived[tokenId];
+    }
+
     /* Attack another gladiator, specifying the tokenid of the target */
     function attack(uint256 attackerTokenId, uint256 targetTokenId) public {
         require(
@@ -165,61 +176,50 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             !isDeath[targetTokenId],
             "You can't attack a gladiator that is already dead!"
         );
-        //If the target is the died dude of the previous game, instead of attacking him he definitely kills him.
+        // If the target is the died dude of the previous game, instead of attacking him he definitely kills him.
         if (targetTokenId == likelyToDieId && isFightClosable()) {
             closeDailyFight();
         } else {
             numberOfAttacksReceived[targetTokenId] += 1;
             numAttacksEverReceived[targetTokenId] += 1;
-            // if this gladiator is receiving more attacks than the current highests, we empty the highests and we append this one
-            // if this gladiator is receiving the same attacks than the current highests, we append it to the highests
+            // if this gladiator (targetTokenId) received a num of attacks greater than the current likelyToDieId
+            // targetTokenId becomes the new likelyToDieId has he received more attacks than everyone else
             if (
-                _highestNumAttacksReceived <=
-                numberOfAttacksReceived[targetTokenId]
+                numberOfAttacksReceived[targetTokenId] >
+                likelyToDieAttacksReceived
             ) {
-                if (
-                    _highestNumAttacksReceived <
-                    numberOfAttacksReceived[targetTokenId]
-                ) {
-                    likelyToDieId = targetTokenId;
-                    _highestNumAttacksReceived = numberOfAttacksReceived[
-                        targetTokenId
-                    ];
-                    // delete mostAttackedCurrently;
-                } else {
-                    if (lessEps >= eps[targetTokenId]) {
-                        if (lessEps > eps[targetTokenId]) {
-                            likelyToDieId = targetTokenId;
-                            lessEps = eps[targetTokenId];
-                        } else {
-                            if (
-                                mostEverAttacks <=
-                                numAttacksEverReceived[targetTokenId]
-                            ) {
-                                if (
-                                    mostEverAttacks <
-                                    numAttacksEverReceived[targetTokenId]
-                                ) {
-                                    likelyToDieId = targetTokenId;
-                                    mostEverAttacks = numAttacksEverReceived[
-                                        targetTokenId
-                                    ];
-                                } else {
-                                    likelyToDieId = 999;
-                                }
-                            }
-                        }
+                setLikelyToDieId(targetTokenId);
+            } else if (
+                numberOfAttacksReceived[targetTokenId] ==
+                likelyToDieAttacksReceived
+            ) {
+                // [Edge Case 1] if this gladiator (targetTokenId) received a num of attacks equal to the current likelyToDieId
+                // we need to compare targetTokenId EPs with likelyToDieId EPS
+                if (likelyToDieEps > eps[targetTokenId]) {
+                    setLikelyToDieId(targetTokenId);
+                } else if (likelyToDieEps == eps[targetTokenId]) {
+                    // [Edge Case 2] if this gladiator (targetTokenId) has the same EPs as the current likelyToDieId
+                    // we need to compare targetTokenId total received attacks with likelyToDieId total received attacks
+                    if (
+                        numAttacksEverReceived[targetTokenId] >
+                        likelyToDieAttacksReceived
+                    ) {
+                        setLikelyToDieId(targetTokenId);
+                    } else {
+                        likelyToDieId = 999;
+                        likelyToDieEps = 0;
+                        likelyToDieAttacksReceived = 0;
                     }
                 }
-                attackSubmitted[attackerTokenId] = targetTokenId;
-                alreadyAttacked[attackerTokenId] = true;
-                emit Attack(
-                    attackerTokenId,
-                    targetTokenId,
-                    msg.sender,
-                    ownerOf(targetTokenId)
-                );
             }
+            attackSubmitted[attackerTokenId] = targetTokenId;
+            alreadyAttacked[attackerTokenId] = true;
+            emit Attack(
+                attackerTokenId,
+                targetTokenId,
+                msg.sender,
+                ownerOf(targetTokenId)
+            );
         }
     }
 
@@ -252,7 +252,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         } else {
             emit NoDeath();
         }
-        _highestNumAttacksReceived = 0;
+        likelyToDieAttacksReceived = 0;
         lastBlockClosedFight = block.number;
     }
 }
