@@ -10,7 +10,7 @@ struct Gladiator {
     uint256 eps;
     uint256 numAttacksEverReceived;
     bool alreadyAttacked;
-    bool isDeath;
+    bool isDead;
 }
 
 interface urbeArena {
@@ -100,9 +100,9 @@ contract Colosseum is Test {
         vm.roll(urbeArena(deployed).blockLag() + block.number); //recall that block starts from 1
         //Now we close the daily fight
         urbeArena(deployed).closeDailyFight();
-        // Now tokenId0 should be death, while tokenid1 should be alive
-        require((urbeArena(deployed).getGladiator(0)).isDeath, "Zombie!");
-        require(!(urbeArena(deployed).getGladiator(1)).isDeath, "Zombie!");
+        // Now tokenId0 should be dead, while tokenid1 should be alive
+        require((urbeArena(deployed).getGladiator(0)).isDead, "Zombie!");
+        require(!(urbeArena(deployed).getGladiator(1)).isDead, "Zombie!");
     }
 
     function testCloseDailyFightWithTie(uint256 max) public {
