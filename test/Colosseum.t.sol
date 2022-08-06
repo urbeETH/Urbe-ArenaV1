@@ -97,7 +97,7 @@ contract Colosseum is Test {
         );
         //We move to the next session
         emit log_uint(urbeArena(deployed).blockLag());
-        vm.roll(urbeArena(deployed).blockLag());
+        vm.roll(urbeArena(deployed).blockLag() + block.number); //recall that block starts from 1
         //Now we close the daily fight
         urbeArena(deployed).closeDailyFight();
         // Now tokenId0 should be death, while tokenid1 should be alive
@@ -110,7 +110,6 @@ contract Colosseum is Test {
         // A "stress test" to check the gas consumed in the worst case scenario for calling closeDailyFight()
         // In such context you have 100 living gladiators and there will be no deaths (third hedge case)
         address deployed = testDeploy();
-        address user1 = address(1);
         //We mint all the supply
         for (uint256 i = 0; i < max; i++) {
             vm.deal(address(uint160(i + 1)), 100e18);
@@ -126,10 +125,13 @@ contract Colosseum is Test {
                 urbeArena(deployed).attack(i, i + 1);
             }
         }
-        vm.prank(user1);
-        //We move to the next session
-        vm.roll(urbeArena(deployed).blockLag());
-        urbeArena(deployed).closeDailyFight();
+        // We move to the next session
+        vm.roll(urbeArena(deployed).blockLag() + block.number); //recall that block starts from 1
+        //We reperform the last attack in order to trigger closefight (in the first cycle the gladiator commits suicide)
+        if (max > 0) {
+            vm.prank(address(uint160(max)));
+            urbeArena(deployed).attack(max - 1, 0);
+        }
     }
 
     function testGetReliableEstimationForCloseDailyFightWithTie() public {

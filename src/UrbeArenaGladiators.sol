@@ -5,6 +5,7 @@
 //thinking a way to handle 1vs1 end fight
 
 pragma solidity >=0.8.0;
+
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -50,10 +51,9 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     }
 
     // Array of the most attacked gladiators (=tokendIds) in this session
-    uint256 internal likelyToDieId = 999;
-    uint256 internal _highestNumAttacksReceived;
-    uint256 internal lessEps = type(uint256).max;
-    uint256 internal mostEverAttacks;
+    uint256 internal likelyToDieId;
+    uint256 internal likelyToDieEps;
+    uint256 internal likelyToDieAttacksReceived;
 
     // Parameters for closing the daily fight
     uint256 lastBlockClosedFight;
@@ -71,6 +71,8 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         setMaxTokens(maxTokens);
         setMaxMints(maxMints);
         setBaseURI(baseURI);
+        setLikelyToDieId(999);
+        lastBlockClosedFight = block.number; // Otherwise the daily fight is immediately closeable
     }
 
     /* Setters */
@@ -90,7 +92,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         MAX_TOKENS = maxTokens_;
     }
 
-    function set_blockLag(uint256 _lag) public onlyOwner {
+    function setBlockLag(uint256 _lag) public onlyOwner {
         _blockLag = _lag;
     }
 
@@ -147,62 +149,67 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         return _blockLag;
     }
 
+    function setLikelyToDieId(uint256 tokenId) internal {
+        likelyToDieId = tokenId;
+        likelyToDieEps = tokenId == 999 ? type(uint256).max : eps[tokenId];
+        likelyToDieAttacksReceived = numberOfAttacksReceived[tokenId];
+    }
+
     /* Attack another gladiator, specifying the tokenid of the target */
     function attack(uint256 attackerTokenId, uint256 targetTokenId) public {
-        require(
-            ownerOf(attackerTokenId) == msg.sender,
-            "You don't own this gladiator"
-        );
-        require(
-            !isDeath[attackerTokenId],
-            "You can't submit an attack because your gladiator is already dead!"
-        );
-        require(
-            !alreadyAttacked[attackerTokenId],
-            "Gladiators can submit one attack per day only!"
-        );
-        require(
-            !isDeath[targetTokenId],
-            "You can't attack a gladiator that is already dead!"
-        );
-        numberOfAttacksReceived[targetTokenId] += 1;
-        numAttacksEverReceived[targetTokenId] += 1;
-        // if this gladiator is receiving more attacks than the current highests, we empty the highests and we append this one
-        // if this gladiator is receiving the same attacks than the current highests, we append it to the highests
-        if (
-            _highestNumAttacksReceived <= numberOfAttacksReceived[targetTokenId]
-        ) {
+        //we check if the gladiator can attack again because enough time has passed
+        if (isFightClosable()) {
+            //Possible redundancy with closeDailyFight condition
+            alreadyAttacked[attackerTokenId] = false;
+            closeDailyFight();
+        } else {
+            require(
+                ownerOf(attackerTokenId) == msg.sender,
+                "You don't own this gladiator"
+            );
+            require(
+                !isDeath[attackerTokenId],
+                "You can't submit an attack because your gladiator is already dead!"
+            );
+            require(
+                !alreadyAttacked[attackerTokenId],
+                "Gladiators can submit one attack per day only!"
+            );
+            require(
+                !isDeath[targetTokenId],
+                "You can't attack a gladiator that is already dead!"
+            );
+            numberOfAttacksReceived[targetTokenId] += 1;
+            numAttacksEverReceived[targetTokenId] += 1;
+            // if this gladiator (targetTokenId) received a num of attacks greater than the current likelyToDieId
+            // targetTokenId becomes the new likelyToDieId has he received more attacks than everyone else
             if (
-                _highestNumAttacksReceived <
-                numberOfAttacksReceived[targetTokenId]
+                numberOfAttacksReceived[targetTokenId] >
+                likelyToDieAttacksReceived
             ) {
-                likelyToDieId = targetTokenId;
-                _highestNumAttacksReceived = numberOfAttacksReceived[
-                    targetTokenId
-                ];
-                // delete mostAttackedCurrently;
-            } else {
-                if (lessEps >= eps[targetTokenId]) {
-                    if (lessEps > eps[targetTokenId]) {
-                        likelyToDieId = targetTokenId;
-                        lessEps = eps[targetTokenId];
-                    } else {
-                        if (
-                            mostEverAttacks <=
-                            numAttacksEverReceived[targetTokenId]
-                        ) {
-                            if (
-                                mostEverAttacks <
-                                numAttacksEverReceived[targetTokenId]
-                            ) {
-                                likelyToDieId = targetTokenId;
-                                mostEverAttacks = numAttacksEverReceived[
-                                    targetTokenId
-                                ];
-                            } else {
-                                likelyToDieId = 999;
-                            }
-                        }
+                setLikelyToDieId(targetTokenId);
+            } else if (
+                numberOfAttacksReceived[targetTokenId] ==
+                likelyToDieAttacksReceived
+            ) {
+                // [Edge Case 1] if this gladiator (targetTokenId) received a num of attacks equal to the current likelyToDieId
+                // we need to compare targetTokenId EPs with likelyToDieId EPS
+                if (eps[targetTokenId] < likelyToDieEps) {
+                    setLikelyToDieId(targetTokenId);
+                } else if (likelyToDieEps == eps[targetTokenId]) {
+                    // [Edge Case 2] if this gladiator (targetTokenId) has the same EPs as the current likelyToDieId
+                    // we need to compare targetTokenId total received attacks with likelyToDieId total received attacks
+                    if (
+                        numAttacksEverReceived[targetTokenId] >
+                        likelyToDieAttacksReceived
+                    ) {
+                        setLikelyToDieId(targetTokenId);
+                    } else if (
+                        numAttacksEverReceived[targetTokenId] ==
+                        likelyToDieAttacksReceived
+                    ) {
+                        // Finally, if we are here we have a tie, nobody dies
+                        setLikelyToDieId(999);
                     }
                 }
             }
@@ -214,7 +221,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
                 msg.sender,
                 ownerOf(targetTokenId)
             );
-            closeDailyFight();
+            // // If the target is the died dude of the previous game, instead of attacking him he definitely kills him.
+            // if (targetTokenId == likelyToDieId && isFightClosable()) {
+            //     closeDailyFight();
+            // } else {
+
+            // }
         }
     }
 
@@ -222,33 +234,36 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         return block.number >= lastBlockClosedFight + _blockLag;
     }
 
+    modifier fightClosable() {
+        require(isFightClosable());
+        _;
+    }
+
     /* Process the attacks received, set a gladiator as died, reward winners with EPs */
-    function closeDailyFight() public {
-        if (isFightClosable()) {
-            uint256 deadGladiatorId = likelyToDieId;
-            if (deadGladiatorId != 999) {
-                isDeath[deadGladiatorId] = true;
-                emit Death(
-                    deadGladiatorId,
-                    ownerOf(deadGladiatorId),
-                    numberOfAttacksReceived[deadGladiatorId]
-                );
-                // give 1 EP to all the gladiators who attacked deadGladiatorId in this round and prepare values for the next game
-                for (uint256 i = 0; i < totalSupply(); i++) {
-                    if (isDeath[i] == false) {
-                        if (attackSubmitted[i] == deadGladiatorId) {
-                            eps[i] += 1;
-                        }
-                        alreadyAttacked[i] = false;
-                        numberOfAttacksReceived[i] = 0;
-                        attackSubmitted[i] = 999;
+    function closeDailyFight() public fightClosable {
+        uint256 deadGladiatorId = likelyToDieId;
+        if (deadGladiatorId != 999) {
+            isDeath[deadGladiatorId] = true;
+            emit Death(
+                deadGladiatorId,
+                ownerOf(deadGladiatorId),
+                numberOfAttacksReceived[deadGladiatorId]
+            );
+            // give 1 EP to all the gladiators who attacked deadGladiatorId in this round and prepare values for the next game
+            for (uint256 i = 0; i < totalSupply(); i++) {
+                if (isDeath[i] == false) {
+                    if (attackSubmitted[i] == deadGladiatorId) {
+                        eps[i] += 1;
                     }
+                    alreadyAttacked[i] = false;
+                    numberOfAttacksReceived[i] = 0;
+                    attackSubmitted[i] = 999;
                 }
-            } else {
-                emit NoDeath();
             }
-            _highestNumAttacksReceived = 0;
-            lastBlockClosedFight = block.number;
+        } else {
+            emit NoDeath();
         }
+        setLikelyToDieId(999);
+        lastBlockClosedFight = block.number;
     }
 }
