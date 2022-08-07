@@ -51,7 +51,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     mapping(uint256 => uint256) public eps; //experience points
     mapping(uint256 => uint256) public numAttacksEverReceived;
     mapping(uint256 => bool) public isDead;
-    // Mapping test
+    // stores a mapping with key = day and value = [attackerTokenId: targetTokenId], to track all the attacks submitted day by day
     mapping(uint256 => mapping(uint256 => uint256)) attacksSubmittedByDay;
 
     struct Gladiator {
