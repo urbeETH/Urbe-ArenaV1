@@ -1,7 +1,7 @@
 node_modules
 .idea
-lib/
 .vscode/
+lib/**
 out/
 cache/
 .DS_Store
