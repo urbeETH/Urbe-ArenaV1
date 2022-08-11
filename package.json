@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "forge test",
+    "test-with-gas": "forge test -vvvvv --gas-report",
+    "test-edge-case-1": "forge test -vvvvv --match-test testAttackEdgeCase1",
+    "test-mint": "forge test -vvvvv --match-test testMint",
+    "test-close-fight-tie": "forge test -vvvvv --match-test testCloseDailyFightWithTie",
     "prettify": "prettier --write 'src/*.sol'"
   },
   "keywords": [],
