@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: MIT
-
-//TO-DO:
-//set time-require (block number) for calling closeDailyFight
-//thinking a way to handle 1vs1 end fight
+//TO DO: - split treasury
 
 pragma solidity >=0.8.0;
 
@@ -10,10 +7,10 @@ import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "openzeppelin-contracts/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
-    // TODO: uint256 -> uint(piu basso)
+    
     // events
     event Death(
         uint256 indexed gladiatorId,
@@ -35,8 +32,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         uint256 day
     ); // (gladiatorId, owner)
     event NoDeath(uint256 indexed day);
+    event GladiatorsWinner(
+        uint256[] gladiatorsWinners,
+        address[] ownerOfGladiatorsWinners
+    );
 
-    // Token Data
+    // NFT Data
     uint256 public TOKEN_PRICE;
     uint256 public MAX_TOKENS;
     uint256 public MAX_MINTS;
@@ -44,6 +45,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     // Metadata
     string public _baseTokenURI;
 
+    //Gladiator Data
     struct Gladiator {
         // number of attacks received in the last battle
         uint256 numberOfAttacksReceived;
@@ -61,22 +63,42 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         uint256 attackSubmittedYesterday;
     }
 
+    //stores a mapping with key = NFT id and value = Gladiator struct
     mapping(uint256 => Gladiator) public gladiators;
 
-    // Array of the most attacked gladiators (=tokendIds) in this session
+    // most attacked gladiators (=tokendIds) data in this session
     uint256 likelyToDieId;
     uint256 internal likelyToDieEps = type(uint256).max; //if we set it to 0, the second edge case will be always skipped
     uint256 internal likelyToDieAttacksReceived;
+
+    //token id(s) if the final winner(s) gladiator(s)
+    uint256[] public gladiatorsWinners;
+    //token id of the last attacker gladiator. Temporary variable updated with each new attack
+    uint256 internal lastAttacker;
+    //token id of the last attacked gladiator. Temporary variable updated with each new attack
+    uint256 internal lastAttacked;
+    //gameFinished == false -> the game is not finished yet. gameFinished == true -> the game is finished and we have winner(s)
+    bool public gameFinished = false;
 
     // Parameters for closing the daily fight
     // current day
     uint256 public day;
     // stores a mapping with key = day and value = tokenId, to track all the deaths
     mapping(uint256 => uint256) public deathByDays;
+    //total death from the beggining of the game
     uint256 totalDeaths;
+    //when the last fight was closed
     uint256 lastTimestampClosedFight;
-    uint256 _blockLag = 1 days; // number of blocks before closing the daily fight
+    // number of days before closing the daily fight
+    uint256 _blockLag = 1 days; 
 
+    //constant to maximeze precision when calculating the executor reward percentage
+    uint256 public constant ONE_HUNDRED = 1e18;
+    //percentage given to the address calling the reward function
+    uint256 public executorRewardPercentage;
+
+
+    //init data
     constructor(
         string memory name,
         string memory symbol,
@@ -96,7 +118,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         totalDeaths = 0;
     }
 
-    /* Setters */
+    //Setters 
     function setBaseURI(string memory baseURI) public onlyOwner {
         _baseTokenURI = baseURI;
     }
@@ -117,12 +139,23 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         _blockLag = _lag;
     }
 
-    /* Getters */
+    //Getters 
     function _baseURI() internal view virtual override returns (string memory) {
         return _baseTokenURI;
     }
+    function getGladiator(uint256 tokenId) public view returns (Gladiator memory){
+        return gladiators[tokenId];
+    }
 
-    /* Main Sale */
+    function getLikelyToDieId() public view returns (uint256) {
+        return likelyToDieId;
+    }
+
+    function blockLag() public view returns (uint256) {
+        return _blockLag;
+    }
+
+    // Main Sale 
     function mintTokens(uint256 numberOfTokens) public payable {
         require(
             numberOfTokens <= MAX_MINTS,
@@ -144,40 +177,17 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         }
     }
 
-    // Getters
-    function getGladiator(uint256 tokenId) public view returns (Gladiator memory){
-        return gladiators[tokenId];
+    //utility functions and modifier to clode a figt
+    function isFightClosable() public view returns (bool) {
+        return block.timestamp >= lastTimestampClosedFight + _blockLag;
     }
 
-    function getLikelyToDieId() public view returns (uint256) {
-        return likelyToDieId;
+    modifier fightClosable() {
+        require(isFightClosable());
+        _;
     }
 
-    function getDeathByDays(uint256 day) public view returns (uint256) {
-        return deathByDays[day];
-    }
-
-    function blockLag() public view returns (uint256) {
-        return _blockLag;
-    }
-
-    function setLikelyToDieId(uint256 tokenId) internal {
-        likelyToDieId = tokenId;
-        likelyToDieEps = tokenId == 999 ? type(uint256).max : gladiators[tokenId].eps;
-        likelyToDieAttacksReceived = tokenId == 999
-        ? 0
-        : gladiators[tokenId].attacksReceivedToday;
-        if (tokenId != 999) {
-            emit WoundedGladiator(
-                tokenId,
-                ownerOf(tokenId),
-                likelyToDieAttacksReceived,
-                day
-            );
-        }
-    }
-
-    /* Attack another gladiator, specifying the tokenId of the target */
+    // Attack another gladiator, specifying the tokenId of the target 
     function attack(uint256 attackerTokenId, uint256 targetTokenId) public {
         // if fight is closable, and we don't have yet a dead gladiator for today (deathByDays[day] contains the placeholder 999)
         // we can close the fight
@@ -222,6 +232,9 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         }
         targetGladiator.numberOfAttacksEverReceived += 1;
         targetGladiator.lastUpdatedAt = block.timestamp;
+        //update temporary lastAttacker and lastAttacked
+        lastAttacker = attackerTokenId;
+        lastAttacked = targetTokenId;
         if (
         // if today this gladiator (targetTokenId) received a num of attacks greater than the current likelyToDieId
         // targetTokenId becomes the new likelyToDieId has he received more attacks than everyone else
@@ -265,17 +278,27 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         );
     }
 
-    function isFightClosable() public view returns (bool) {
-        return block.timestamp >= lastTimestampClosedFight + _blockLag;
-    }
+    //set the current more likely to die Gladiator
 
-    modifier fightClosable() {
-        require(isFightClosable());
-        _;
+    function setLikelyToDieId(uint256 tokenId) internal {
+        likelyToDieId = tokenId;
+        likelyToDieEps = tokenId == 999 ? type(uint256).max : gladiators[tokenId].eps;
+        likelyToDieAttacksReceived = tokenId == 999
+        ? 0
+        : gladiators[tokenId].attacksReceivedToday;
+        if (tokenId != 999) {
+            emit WoundedGladiator(
+                tokenId,
+                ownerOf(tokenId),
+                likelyToDieAttacksReceived,
+                day
+            );
+        }
     }
 
     /* Process the attacks received, set a gladiator as died, reward winners with EPs */
     function closeDailyFight() public fightClosable {
+        require(!gameFinished, "game already finished");
         uint256 deadGladiatorId = likelyToDieId;
         if (deadGladiatorId != 999) {
             gladiators[deadGladiatorId].isDead = true;
@@ -291,18 +314,42 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             deathByDays[day] = 999;
             emit NoDeath(day);
         }
-        // game ended when only one gladiator is alive
-        if (totalDeaths == totalSupply() - 1) {
-            // get the only gladiator alive and send him part of the treasury
-            // TODO: complete end game
-            _endGame();
-        }
+        // game ended when only one gladiator is alive or when there is a final tie. This function calculates the winner(s) gladiator(s) 
+        _finalizeGladiatorsWinners();
         setLikelyToDieId(999);
         lastTimestampClosedFight = block.timestamp;
         day++;
         deathByDays[day] = 999;
     }
 
+        //utility function to define the Gladiator(s) winner(s)
+    function _finalizeGladiatorsWinners() internal returns(bool result) {
+        address[] memory ownerOfGladiatorsWinners = new address[](2);
+        if (totalDeaths == totalSupply() - 1) {
+            gladiatorsWinners.push(lastAttacker);
+            ownerOfGladiatorsWinners[0] = ownerOf(lastAttacker);
+            gameFinished = true;
+            emit GladiatorsWinner(
+            gladiatorsWinners,
+            ownerOfGladiatorsWinners
+        );
+            return gameFinished;
+        }
+        else if(totalDeaths == totalSupply() - 2 && deathByDays[day] == deathByDays[day-1]){
+            gladiatorsWinners.push(lastAttacker);
+            gladiatorsWinners.push(lastAttacked);
+            ownerOfGladiatorsWinners[0] = ownerOf(lastAttacker);   
+            ownerOfGladiatorsWinners[1] = ownerOf(lastAttacked);   
+            gameFinished = true;
+            emit GladiatorsWinner(
+            gladiatorsWinners,
+            ownerOfGladiatorsWinners
+        );
+            return gameFinished;
+        }
+    }
+
+    //utility function to assign EPs to Gladiators
     function _assignEps(uint256 tokenId) internal {
         Gladiator storage gladiator = gladiators[tokenId];
         if (
@@ -314,7 +361,35 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         }
     }
 
-    function widthdraw() internal {
 
+    //to do create split logic
+    function widthdraw(address executorRewardAddress) public {
+        require(gameFinished, "the game must finish first");
+        uint256 availableAmount = address(this).balance;
+        require(availableAmount > 0, "balance");
+        uint256 receiverAmount = 0;
+
+        if(executorRewardPercentage > 0) {
+            address to = executorRewardAddress == address(0) ? msg.sender : executorRewardAddress;
+            submit(to, receiverAmount = _calculatePercentage(availableAmount, executorRewardPercentage), "");
+            availableAmount -= receiverAmount;
+        }
+        uint256 remainingAmount = availableAmount;
+
+        //finish
+    }
+
+    function _calculatePercentage(uint256 amount, uint256 percentage) private pure returns(uint256) {
+        return (amount * ((percentage * 1e18) / ONE_HUNDRED)) / 1e18;
+    }
+
+    function submit(address subject, uint256 value, bytes memory inputData) internal returns(bytes memory returnData) {
+        bool result;
+        (result, returnData) = subject.call{value : value}(inputData);
+        if(!result) {
+            assembly {
+                revert(add(returnData, 0x20), mload(returnData))
+            }
+        }
     }
 }
