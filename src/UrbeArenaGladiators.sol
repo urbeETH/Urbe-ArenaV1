@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: MIT
-//TO DO: - split treasury
-
 pragma solidity >=0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
@@ -54,7 +52,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         // number of attacks received so far (all the battles)
         uint256 numberOfAttacksEverReceived;
         // records the gladiator life status
-        bool isDead;
+        bool isAlive;
         // timestamp of the last update for this gladiator
         uint256 lastUpdatedAt;
 
@@ -78,7 +76,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     //token id of the last attacked gladiator. Temporary variable updated with each new attack
     uint256 internal lastAttacked;
     //gameFinished == false -> the game is not finished yet. gameFinished == true -> the game is finished and we have winner(s)
-    bool public gameFinished = false;
+    bool public gameFinished;
 
     // Parameters for closing the daily fight
     // current day
@@ -96,6 +94,14 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     uint256 public constant ONE_HUNDRED = 1e18;
     //percentage given to the address calling the reward function
     uint256 public executorRewardPercentage;
+    //percentage givent to the gladiator winner
+    uint256 public winnerRewardPercentage;
+    //percentage given to the galdiators winners
+    uint256 public halfWinnerRewardPercentage;
+    //minimum value of the top
+    uint256 topLow;
+    //maximum value of the top
+    uint256 topHigh;
 
 
     //init data
@@ -173,7 +179,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             uint256 mintIndex = uint256(totalSupply());
             _safeMint(msg.sender, mintIndex);
             emit Mint(mintIndex, msg.sender);
-            gladiators[mintIndex] = Gladiator(0, 0, 0, false, block.timestamp, 0, 999, 999);
+            gladiators[mintIndex] = Gladiator(0, 0, 0, true, block.timestamp, 0, 999, 999);
         }
     }
 
@@ -214,7 +220,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             "You don't own this gladiator"
         );
         require(
-            attackerGladiator.isDead == false,
+            attackerGladiator.isAlive == true,
             "You can't submit an attack because your gladiator is already dead!"
         );
         require(
@@ -222,7 +228,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             "Gladiators can submit one attack per day only!"
         );
         require(
-            !targetGladiator.isDead,
+            targetGladiator.isAlive,
             "You can't attack a gladiator that is already dead!"
         );
         if (targetGladiator.lastUpdatedAt <= block.timestamp + 1 days) {
@@ -296,12 +302,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         }
     }
 
-    /* Process the attacks received, set a gladiator as died, reward winners with EPs */
+    //Process the attacks received, set a gladiator as died, reward winners with EPs */
     function closeDailyFight() public fightClosable {
         require(!gameFinished, "game already finished");
         uint256 deadGladiatorId = likelyToDieId;
         if (deadGladiatorId != 999) {
-            gladiators[deadGladiatorId].isDead = true;
+            gladiators[deadGladiatorId].isAlive = false;
             deathByDays[day] = deadGladiatorId;
             totalDeaths+=1;
             emit Death(
@@ -315,38 +321,59 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
             emit NoDeath(day);
         }
         // game ended when only one gladiator is alive or when there is a final tie. This function calculates the winner(s) gladiator(s) 
-        _finalizeGladiatorsWinners();
         setLikelyToDieId(999);
         lastTimestampClosedFight = block.timestamp;
         day++;
         deathByDays[day] = 999;
     }
 
-        //utility function to define the Gladiator(s) winner(s)
-    function _finalizeGladiatorsWinners() internal returns(bool result) {
-        address[] memory ownerOfGladiatorsWinners = new address[](2);
+    //utility function to define the Gladiator(s) winner(s) and send him(them) the 50% of the treasury
+    function finalizeGameAndSplitTreasuryWinner(uint256 tokenId1, address executorRewardAddress) public {
+        require(!gameFinished, "the game must finish first");
+        uint256 availableAmount = address(this).balance;
+        require(availableAmount > 0, "balance");
+        uint256 receiverAmount = 0;
+
+        if(executorRewardPercentage > 0) {
+            address to = executorRewardAddress == address(0) ? msg.sender : executorRewardAddress;
+            submit(to, receiverAmount = _calculatePercentage(availableAmount, executorRewardPercentage), "");
+            availableAmount -= receiverAmount;
+        }
+        uint256 remainingAmount = availableAmount;
+
         if (totalDeaths == totalSupply() - 1) {
-            gladiatorsWinners.push(lastAttacker);
-            ownerOfGladiatorsWinners[0] = ownerOf(lastAttacker);
+            if(gladiators[tokenId1].isAlive = true){
+            address winner = ownerOf(tokenId1);
+            require(winner!=address(0));
+            submit(winner, receiverAmount = _calculatePercentage(remainingAmount, winnerRewardPercentage), "");
             gameFinished = true;
-            emit GladiatorsWinner(
-            gladiatorsWinners,
-            ownerOfGladiatorsWinners
-        );
-            return gameFinished;
+            }
         }
         else if(totalDeaths == totalSupply() - 2 && deathByDays[day] == deathByDays[day-1]){
-            gladiatorsWinners.push(lastAttacker);
-            gladiatorsWinners.push(lastAttacked);
-            ownerOfGladiatorsWinners[0] = ownerOf(lastAttacker);   
-            ownerOfGladiatorsWinners[1] = ownerOf(lastAttacked);   
+            address lastAttackerAddress = ownerOf(lastAttacker);
+            address lastAttackedAddress = ownerOf(lastAttacked);
+            submit(lastAttackerAddress, receiverAmount = _calculatePercentage(remainingAmount, winnerRewardPercentage), "");
+            submit(lastAttackedAddress, receiverAmount = _calculatePercentage(remainingAmount, winnerRewardPercentage), "");
             gameFinished = true;
-            emit GladiatorsWinner(
-            gladiatorsWinners,
-            ownerOfGladiatorsWinners
-        );
-            return gameFinished;
+        }   
+    }
+
+    //after triggering the finalizeGameAndSplitTreasuryWinner, this function can be used to collect the reward for gladiators who fall into a top
+    function widthdraw(address executorRewardAddress, uint256 deathDay) public {
+        require(gameFinished, "the game must finish first");
+        uint256 availableAmount = address(this).balance;
+        require(availableAmount > 0, "balance");
+        uint256 receiverAmount = 0;
+
+        if(executorRewardPercentage > 0) {
+            address to = executorRewardAddress == address(0) ? msg.sender : executorRewardAddress;
+            submit(to, receiverAmount = _calculatePercentage(availableAmount, executorRewardPercentage), "");
+            availableAmount -= receiverAmount;
         }
+        uint256 remainingAmount = availableAmount;
+
+        (uint256 calculatedAmount, address winner) = _calculateTopWinners(remainingAmount, deathDay);
+        submit(winner, calculatedAmount, "");
     }
 
     //utility function to assign EPs to Gladiators
@@ -361,24 +388,16 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
         }
     }
 
-
-    //to do create split logic
-    function widthdraw(address executorRewardAddress) public {
-        require(gameFinished, "the game must finish first");
-        uint256 availableAmount = address(this).balance;
-        require(availableAmount > 0, "balance");
-        uint256 receiverAmount = 0;
-
-        if(executorRewardPercentage > 0) {
-            address to = executorRewardAddress == address(0) ? msg.sender : executorRewardAddress;
-            submit(to, receiverAmount = _calculatePercentage(availableAmount, executorRewardPercentage), "");
-            availableAmount -= receiverAmount;
-        }
-        uint256 remainingAmount = availableAmount;
-
-        //finish
+    //utility function to calculate the reward for a specific gladiator 
+    function _calculateTopWinners(uint256 amount, uint256 deathDay) internal view returns(uint256, address){
+      uint256 id = deathByDays[day];
+      require(id !=999, "invalid token");
+      require(deathDay <= topHigh && deathDay >= topLow, "no reward for you");
+      address winner = ownerOf(id);
+      return ((amount * (deathDay/totalSupply())), winner);
     }
 
+    //utility function to calculate a certain percentage
     function _calculatePercentage(uint256 amount, uint256 percentage) private pure returns(uint256) {
         return (amount * ((percentage * 1e18) / ONE_HUNDRED)) / 1e18;
     }
