@@ -331,9 +331,9 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
 
     //utility function to register a new share
     function _registerShare(uint256 id) internal {
+        require(day >= topLow);
         require(totalDeaths <= totalSupply() - 2);
         require(id!=999);
-        require(day >= topLow);
         shares.push(id);
     }
 
