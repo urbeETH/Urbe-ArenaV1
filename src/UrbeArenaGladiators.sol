@@ -33,7 +33,12 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     event Winner(
         uint256 indexed gladiatorId1,
         uint256 indexed gladiatorId2,
-        address[] GladiatordWinners,
+        address[] indexed GladiatordWinners,
+        uint256 day
+    );
+    event WithdrawShare(
+        uint256 indexed id,
+        address indexed idOwner,
         uint256 day
     );
 
@@ -94,10 +99,8 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     uint256 public winnerRewardPercentage;
     //percentage given to the galdiators winners
     uint256 public halfWinnerRewardPercentage;
-    //minimum value of the top x dead gladiators to reward
-    uint256 topLow;
-    //stores a mapping with key = NFT id and value = bool (true if the id already received the reward) 
-    mapping(uint256=>bool) split;
+    //day from which if a gladiator dies he falls into the top x gladiators who are eligible for a reward proportional to its share amount
+    uint256 dayTop;
     //stores a mapping with key = id and value = number of shares
     mapping(uint256=>uint256) sharesAmount;
     //all ids eligible for a share
@@ -331,7 +334,7 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
 
     //utility function to register a new share
     function _registerShare(uint256 id) internal {
-        require(day >= topLow);
+        require(day >= dayTop);
         require(totalDeaths <= totalSupply() - 2);
         require(id!=999);
         shares.push(id);
@@ -340,28 +343,30 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     //utility function to define the Gladiator(s) winner(s) and send him(them) the 50% of the treasury
     function finalizeGameAndSplitTreasuryWinner(uint256 tokenId1, uint256 tokenId2, address executorRewardAddress) public{
         require(!gameFinished, "the game must finish first");
+        require(gladiators[tokenId1].isAlive = true, "invalid token");
+
+        address winnerAddress1 = ownerOf(tokenId1);
+        require(winnerAddress1!=address(0));
+
         uint256 availableAmount = address(this).balance;
         require(availableAmount > 0, "balance");
+
         uint256 receiverAmount1 = 0;
         uint256 receiverAmount2 = 0;
         address[] memory winners = new address[](2);
 
         if (totalDeaths == totalSupply() - 1) {
-            require(gladiators[tokenId1].isAlive = true, "invalid token");
-            address winnerAddress1 = ownerOf(tokenId1);
-            require(winnerAddress1!=address(0));
             submit(winnerAddress1, receiverAmount1 = _calculatePercentage(availableAmount, winnerRewardPercentage), "");
             shares.push(deathByDays[day-1]);
             gameFinished = true;
             winners[0] = winnerAddress1;
         }
         else if(totalDeaths == totalSupply() - 2 && deathByDays[day] == deathByDays[day-1]){
-            require(gladiators[tokenId1].isAlive = true, "invalid token");
             require(gladiators[tokenId2].isAlive = true, "invalid token");
-            address winnerAddress1 = ownerOf(tokenId1);
             address winnerAddress2 = ownerOf(tokenId2);
-            submit(winnerAddress1, receiverAmount1 = _calculatePercentage(availableAmount, winnerRewardPercentage), "");
-            submit(winnerAddress2, receiverAmount2 = _calculatePercentage(availableAmount, winnerRewardPercentage), "");
+            require(winnerAddress2!=address(0));
+            submit(winnerAddress1, receiverAmount1 = _calculatePercentage(availableAmount, halfWinnerRewardPercentage), "");
+            submit(winnerAddress2, receiverAmount2 = _calculatePercentage(availableAmount, halfWinnerRewardPercentage), "");
             gameFinished = true;
             winners[0] = winnerAddress1;
             winners[1] = winnerAddress2;
@@ -393,11 +398,16 @@ contract UrbeArenaGladiators is ERC721Enumerable, Ownable {
     function widthdraw(uint256 id) public {
         require(gameFinished, "the game must finish first");
         require(sharesAmount[id]!=0,"invalid token");
-        require(split[id] == false, "reward already received");
 
         (uint256 calculatedAmount) = _calculateTopWinners(availableTreasury, sharesAmount[id]);
         submit(ownerOf(id), calculatedAmount, "");
-        split[id] = true;
+        sharesAmount[id]=0;
+
+        emit WithdrawShare(
+                id,
+                ownerOf(id),
+                day
+            );
     }
 
     //utility function to assign EPs to Gladiators
